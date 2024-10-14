@@ -1,0 +1,167 @@
+import numpy as np
+
+def f(x):
+    """
+    :param x: np.array(np.float) размерности 2
+    :return: float
+    """
+    return np.sum(np.sin(x)**2, axis=0)
+
+
+def grad_f(x): 
+    """
+    Градиент функциии f, определенной выше.
+    :param x: np.array[2]: float вектор длины 2
+    :return: np.array[2]: float вектор длины 2
+    """
+    return np.array(np.sin(2*x)) 
+
+
+def grad_descent_2d(f, grad_f, lr, num_iter=100, x0=None):
+    """
+    функция, которая реализует градиентный спуск в минимум для функции f от двух переменных. 
+        :param f: скалярная функция двух переменных
+        :param grad_f: функция, возвращающая градиент функции f (устроена как реализованная вами выше grad_f)
+        :param lr: learning rate алгоритма
+        :param num_iter: количество итераций градиентного спуска
+        :return: np.array[num_iter, 2] пар вида (x, f(x))
+    """
+    if x0 is None:
+        x0 = np.random.random(2)
+
+    # будем сохранять значения аргументов и значений функции 
+    # в процессе град. спуска в переменную history
+    history = []
+
+    # итерация цикла -- шаг градиентнго спуска
+    curr_x = x0.copy()
+    for iter_num in range(num_iter):
+        entry = np.hstack((curr_x, f(curr_x)))
+        history.append(entry)
+        # не забудьте про lr!
+        curr_x -= lr*grad_f(curr_x)
+
+    return np.vstack(history)
+
+#Batches generation
+def generate_batches(X, y, batch_size):
+    """
+    param X: np.array[n_objects, n_features] --- матрица объекты-признаки
+    param y: np.array[n_objects] --- вектор целевых переменных
+    """
+    assert len(X) == len(y)
+    np.random.seed(42)
+    X = np.array(X)
+    y = np.array(y)
+    perm = np.random.permutation(len(X))
+
+    for i in range(0, len(X), batch_size):  # Перебираем индексы с шагом batch_size
+        batch_end = i + batch_size
+        if (batch_end > len(X)):
+          break
+        batch_indices = perm[i:batch_end]  # Получаем индексы для текущего батча
+        yield X[batch_indices], y[batch_indices]  # Возвращаем батч
+
+def logit(x, w):
+    return np.dot(x, w)
+
+def sigmoid(h):
+    return 1. / (1 + np.exp(-h))
+
+
+class MyLogisticRegression(object):
+    def __init__(self):
+        self.w = None
+
+    def fit(self, X, y, epochs=10, lr=0.1, batch_size=100):
+        n, k = X.shape        
+        if self.w is None:
+            np.random.seed(42)
+            # Вектор столбец в качестве весов
+            self.w = np.random.randn(k + 1)
+
+        X_train = np.concatenate((np.ones((n, 1)), X), axis=1)
+
+        losses = []
+
+        for i in range(epochs):
+            for X_batch, y_batch in generate_batches(X_train, y, batch_size):
+                #В X_train уже добавлен вектор 1
+                
+                predictions = sigmoid(logit(X_batch, self.w))
+                loss = self.__loss(y_batch, predictions)
+
+                assert (np.array(loss).shape == tuple()), "Лосс должен быть скаляром!" 
+
+                losses.append(loss)
+                self.w -= lr * self.get_grad(X_batch, y_batch, predictions)
+        return losses
+
+    def get_grad(self, X_batch, y_batch, predictions):
+        """
+
+        param X_batch: np.array[batch_size, n_features + 1] --- матрица объекты-признаки
+        param y_batch: np.array[batch_size] --- батч целевых переменных
+        param predictions: np.array[batch_size] --- батч вероятностей классов
+
+        Принимает на вход X_batch с уже добавленной колонкой единиц. 
+        Выдаёт градиент функции потерь в логистической регрессии
+        как сумму градиентов функции потерь на всех объектах батча
+        Выход -- вектор-столбец градиентов для каждого веса (np.array[n_features + 1])
+        """
+
+        grad_basic = X_batch.T @ (predictions - y_batch)
+        assert grad_basic.shape == (X_batch.shape[1],) , "Градиенты должны быть столбцом из k_features + 1 элементов"
+
+        return grad_basic
+
+    def predict_proba(self, X):
+        n, k = X.shape
+        X_ = np.concatenate((np.ones((n, 1)), X), axis=1)
+        return sigmoid(logit(X_, self.w))
+
+    def _predict_proba_internal(self, X): 
+        """
+        Не конкатенирует вход с вектором из единиц, как predict_proba
+        """
+        return sigmoid(logit(X, self.w))
+
+    def predict(self, X, threshold=0.5):
+        return self.predict_proba(X) >= threshold
+
+    def get_weights(self):
+        return self.w.copy() 
+
+    def __loss(self, y, p):  
+        p = np.clip(p, 1e-10, 1 - 1e-10)
+        return -np.sum(y * np.log(p) + (1 - y) * np.log(1 - p))
+
+class MyElasticLogisticRegression(MyLogisticRegression):
+    def __init__(self, l1_coef, l2_coef):
+        self.l1_coef = l1_coef
+        self.l2_coef = l2_coef
+        self.w = None
+
+    def get_grad(self, X_batch, y_batch, predictions):
+        """
+        Принимает на вход X_batch с уже добавленной колонкой единиц. 
+        Выдаёт градиент функции потерь в логистической регрессии с регуляризаторами
+        как сумму градиентов функции потерь на всех объектах батча + регуляризационное слагаемое
+
+        Выход -- вектор-столбец градиентов для каждого веса (np.array[n_features + 1])
+        """
+
+
+        grad_basic = X_batch.T @ (predictions - y_batch)
+        l2 = self.w.copy()
+        l2[0] = 0 # Исключаем первый элемент (bias)
+        grad_l2 = 2 * self.l2_coef * l2
+        signw = np.sign(self.w)  # Исключаем первый элемент (bias)
+        signw[0] = 0
+        grad_l1 = self.l1_coef * signw[:]
+
+        assert grad_l1[0] == grad_l2[0] == 0, "Bias в регуляризационные слагаемые не входит!"
+        assert grad_basic.shape == grad_l1.shape == grad_l2.shape == (X_batch.shape[1],) , "Градиенты должны быть столбцом из k_features + 1 элементов"
+
+        return grad_basic + grad_l1 + grad_l2
+
